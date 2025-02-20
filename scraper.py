@@ -3,6 +3,42 @@ from bs4 import BeautifulSoup
 import json
 from datetime import datetime
 import os
+class ArticleListCache:
+    def __init__(self, list_cache_file='article_list_cache.json'):
+        self.list_cache_file = list_cache_file
+        self.cache = self._load_cache()
+
+    def _load_cache(self):
+        """Load the list cache from file if it exists"""
+        if os.path.exists(self.list_cache_file):
+            try:
+                with open(self.list_cache_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except json.JSONDecodeError:
+                return {'articles': [], 'last_updated': None}
+        return {'articles': [], 'last_updated': None}
+
+    def _save_cache(self):
+        """Save the list cache to file"""
+        with open(self.list_cache_file, 'w', encoding='utf-8') as f:
+            json.dump(self.cache, f, ensure_ascii=False, indent=2)
+
+    def get_cached_list(self):
+        """Get cached article list if it's recent enough (within 1 hour)"""
+        if not self.cache['last_updated']:
+            return None
+
+        last_updated = datetime.fromisoformat(self.cache['last_updated'])
+        if (datetime.now() - last_updated).total_seconds() < 3600:  # 1 hour
+            return self.cache['articles']
+        return None
+
+    def update_cache(self, articles):
+        """Update the article list cache"""
+        self.cache['articles'] = articles
+        self.cache['last_updated'] = datetime.now().isoformat()
+        self._save_cache()
+
 
 class ArticleCache:
     def __init__(self, cache_file='article_cache.json'):
@@ -294,28 +330,30 @@ def scrape_article_basic(url):
 def main():
     # url = input("Please enter the URL to scrape: ")
     url = 'https://www.newsinlevels.com'
-    cache = ArticleCache()
 
-    # Example usage - basic scraper
-    # scrape_article_basic(url)
-
-    # Example usage - enhanced scraper
-    content = scrape_article_list(url)
-
-    # Process each article
-    for article in content:
-        title_link = article['title_link']
-
-        # Check if article is in cache
-        cached_article = cache.get_article(title_link)
-        if cached_article:
-            print(f"Loading cached article: {article['title']}")
-            article['details'] = cached_article
-        else:
-            print(f"Scraping new article: {article['title']}")
-            article_data = scrape_article_detail(title_link)
-            article['details'] = article_data
-            cache.add_article(title_link, article_data)
+    ######################################################## this is article detail scraper
+    # cache = ArticleCache()
+    #
+    # # Example usage - basic scraper
+    # # scrape_article_basic(url)
+    #
+    # # Example usage - enhanced scraper
+    # content = scrape_article_list(url)
+    #
+    # # Process each article
+    # for article in content:
+    #     title_link = article['title_link']
+    #
+    #     # Check if article is in cache
+    #     cached_article = cache.get_article(title_link)
+    #     if cached_article:
+    #         print(f"Loading cached article: {article['title']}")
+    #         article['details'] = cached_article
+    #     else:
+    #         print(f"Scraping new article: {article['title']}")
+    #         article_data = scrape_article_detail(title_link)
+    #         article['details'] = article_data
+    #         cache.add_article(title_link, article_data)
 
 
     # Example article URL
@@ -330,6 +368,56 @@ def main():
     #     # print(json.dumps(article_data, indent=2, ensure_ascii=False))
     #     print(json.dumps(content[0], indent=2, ensure_ascii=False))
 
+
+
+    article_cache = ArticleCache()
+    list_cache = ArticleListCache()
+
+    # Try to get cached article list
+    cached_list = list_cache.get_cached_list()
+    # Try to get cached article list and compare
+    cached_list = list_cache.get_cached_list()
+    new_content = scrape_article_list(url)
+    content = []
+
+    if cached_list:
+        print("Comparing with cached article list")
+        cached_urls = {article['title_link'] for article in cached_list}
+
+        # Check each new article
+        for article in new_content:
+            if article['title_link'] in cached_urls:
+                print(f"Article exists in cache: {article['title']}")
+                # Get the cached version
+                content.append(next(a for a in cached_list if a['title_link'] == article['title_link']))
+            else:
+                print(f"New article found: {article['title']}")
+                content.append(article)
+    else:
+        print("No cached list found, using all new articles")
+        content = new_content
+
+    # Update cache with latest content
+    list_cache.update_cache(content)
+
+    # Process each article
+    for article in content:
+        title_link = article['title_link']
+
+        # Check if article is in cache
+        cached_article = article_cache.get_article(title_link)
+        if cached_article:
+            print(f"Loading cached article: {article['title']}")
+            article['details'] = cached_article
+        else:
+            print(f"Scraping new article: {article['title']}")
+            article_data = scrape_article_detail(title_link)
+            article['details'] = article_data
+            article_cache.add_article(title_link, article_data)
+
+    # Save results
+    scraper = NewsScraperBase(url)
+    scraper.save_to_json(content)
 
 if __name__ == "__main__":
     main()
